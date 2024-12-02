@@ -2,32 +2,60 @@ use std::error::Error;
 
 use axum::{
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
-use mongodb::{
-    bson::{doc, Document},
-    Collection,
-};
+
+use futures::TryStreamExt;
+use mongodb::{bson::doc, Collection};
+
 use serde::{Deserialize, Serialize};
 
+const URI_DB: &str = "mongodb://127.0.0.1:27017/";
+
 #[derive(Serialize, Deserialize, Debug)]
-struct TransactionRD {
+struct Transaction {
     title: String,
     amount: f32,
     date_time: String,
-    description: String,
+    description: Option<String>,
 }
 
 async fn alive() -> &'static str {
     "Alive"
 }
 
-async fn save_transaction(
-    Json(transaction): Json<TransactionRD>,
-) -> (StatusCode, Json<TransactionRD>) {
+async fn save_transaction(Json(transaction): Json<Transaction>) -> Response {
     dbg!(&transaction);
-    (StatusCode::OK, Json(transaction))
+    let coll_client = db_transaction().await;
+    let resp_db = coll_client.insert_one(&transaction).await;
+    match resp_db {
+        Ok(_) => (StatusCode::OK, Json(transaction)).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR).into_response(),
+    }
+}
+
+async fn get_transaction() -> StatusCode {
+    let coll_client: Collection<Transaction> = db_transaction().await;
+    let mut resp_db = coll_client
+        .find(doc! {})
+        .await
+        .unwrap();
+
+    while let Some(record) = resp_db.try_next().await.unwrap() {
+        println!("{:#?}", record);
+    }
+
+    StatusCode::OK
+}
+
+async fn db_transaction() -> mongodb::Collection<Transaction> {
+    mongodb::Client::with_uri_str(URI_DB)
+        .await
+        .unwrap()
+        .database("financial_db")
+        .collection::<Transaction>("transactions")
 }
 
 #[tokio::main]
@@ -43,15 +71,5 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     axum::serve(listener, app).await.unwrap();
 
-    Ok(())
-}
-
-async fn get_transaction() -> StatusCode {
-    let uri = "mongodb://127.0.0.1:27017/";
-    let client = mongodb::Client::with_uri_str(uri).await.unwrap();
-    let database = client.database("financial");
-    let collection: Collection<Document> = database.collection("transactions");
-    let transaction_records = collection.find_one(doc! { "title": "salary" }).await.unwrap();
-    println!("Found transactions:\n{:#?}", transaction_records);
-    StatusCode::OK
+    todo!("Implement return a array of transactions and change name for get_all");
 }
