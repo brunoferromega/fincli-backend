@@ -22,6 +22,17 @@ struct Transaction {
     description: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct Transactions {
+    transactions: Vec<Transaction>,
+}
+
+impl From<Vec<Transaction>> for Transactions {
+    fn from(transactions: Vec<Transaction>) -> Transactions {
+        Transactions { transactions }
+    }
+}
+
 async fn alive() -> &'static str {
     "Alive"
 }
@@ -36,18 +47,19 @@ async fn save_transaction(Json(transaction): Json<Transaction>) -> Response {
     }
 }
 
-async fn get_transaction() -> StatusCode {
+async fn get_all_transactions() -> Response {
     let coll_client: Collection<Transaction> = db_transaction().await;
-    let mut resp_db = coll_client
+    let resp_db = coll_client
         .find(doc! {})
         .await
         .unwrap();
 
-    while let Some(record) = resp_db.try_next().await.unwrap() {
-        println!("{:#?}", record);
-    }
+    let transactions: Vec<Transaction> = resp_db.try_collect().await.unwrap();
+    dbg!(&transactions);
+    
+    let resp_all_transc: Transactions = transactions.into();
 
-    StatusCode::OK
+    (StatusCode::OK, Json(resp_all_transc)).into_response()
 }
 
 async fn db_transaction() -> mongodb::Collection<Transaction> {
@@ -63,7 +75,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app = Router::new()
         .route("/", get(alive))
         .route("/transactions", post(save_transaction))
-        .route("/transactions", get(get_transaction));
+        .route("/transactions", get(get_all_transactions));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
@@ -71,5 +83,5 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     axum::serve(listener, app).await.unwrap();
 
-    todo!("Implement return a array of transactions and change name for get_all");
+    Ok(())
 }
